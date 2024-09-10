@@ -7,6 +7,7 @@ const {
   Routes,
   SlashCommandBuilder,
 } = require("discord.js");
+const moment = require("moment-timezone");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,8 +31,8 @@ const client = new Client({
 });
 
 const TOKEN = process.env.BOT_TOKEN;
-let userSettings = {}; // { userId: { alias: "", notAllowedTime: "", channelId: "" } }
-let superDcSettings = {}; // { userId: { alias: "", timeRange: "" } }
+let userSettings = {}; // { userId: { alias: "", notAllowedTime: "", channelId: "", timezone: "" } }
+let superDcSettings = {}; // { userId: { alias: "", timeRange: "", timezone: "" } }
 let targetChannels = []; // [{ channelId: "", alias: "" }]
 let logChannelId = null; // Channel ID for logging
 let modUsers = new Set(); // Set of user IDs with permission to modify settings
@@ -54,6 +55,12 @@ const commands = [
     )
     .addStringOption((option) =>
       option.setName("channelid").setDescription("Channel ID").setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("timezone")
+        .setDescription("Timezone (default: Asia/Kolkata)")
+        .setRequired(false)
     )
     .setDefaultMemberPermissions(0x00000008), // Admin permission
   new SlashCommandBuilder()
@@ -112,6 +119,12 @@ const commands = [
         .setDescription("Time range (HH:MM-HH:MM)")
         .setRequired(true)
     )
+    .addStringOption((option) =>
+      option
+        .setName("timezone")
+        .setDescription("Timezone (default: Asia/Kolkata)")
+        .setRequired(false)
+    )
     .setDefaultMemberPermissions(0x00000008), // Admin permission
   new SlashCommandBuilder()
     .setName("removesuperdc")
@@ -169,14 +182,16 @@ client.on("interactionCreate", async (interaction) => {
       .getString("notallowedtime")
       .trim();
     const channelId = interaction.options.getString("channelid").trim();
+    const timezone =
+      interaction.options.getString("timezone") || "Asia/Kolkata";
 
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(notAllowedTime)) {
       return interaction.reply("Invalid time range format. Use HH:MM-HH:MM.");
     }
 
-    userSettings[userId] = { alias, notAllowedTime, channelId };
+    userSettings[userId] = { alias, notAllowedTime, channelId, timezone };
     await interaction.reply(
-      `User ${alias} set with not allowed time ${notAllowedTime} in channel ${channelId}.`
+      `User ${alias} set with not allowed time ${notAllowedTime} in channel ${channelId} with timezone ${timezone}.`
     );
   }
 
@@ -225,13 +240,13 @@ client.on("interactionCreate", async (interaction) => {
 
   if (commandName === "userlist") {
     const regularUsers = Object.entries(userSettings).map(
-      ([userId, { alias, notAllowedTime, channelId }]) =>
-        `${alias} (${userId}): ${notAllowedTime} in channel ${channelId}`
+      ([userId, { alias, notAllowedTime, channelId, timezone }]) =>
+        `${alias} (${userId}): ${notAllowedTime} in channel ${channelId} (Timezone: ${timezone})`
     );
 
     const superDcUsers = Object.entries(superDcSettings).map(
-      ([userId, { alias, timeRange }]) =>
-        `${alias} (${userId}): Super DC during ${timeRange}`
+      ([userId, { alias, timeRange, timezone }]) =>
+        `${alias} (${userId}): Super DC during ${timeRange} (Timezone: ${timezone})`
     );
 
     const userList = [...regularUsers, ...superDcUsers].join("\n");
@@ -256,14 +271,16 @@ client.on("interactionCreate", async (interaction) => {
     const userId = interaction.options.getString("userid").trim();
     const alias = interaction.options.getString("alias").trim();
     const timeRange = interaction.options.getString("timerange").trim();
+    const timezone =
+      interaction.options.getString("timezone") || "Asia/Kolkata";
 
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(timeRange)) {
       return interaction.reply("Invalid time range format. Use HH:MM-HH:MM.");
     }
 
-    superDcSettings[userId] = { alias, timeRange };
+    superDcSettings[userId] = { alias, timeRange, timezone };
     await interaction.reply(
-      `User ${alias} set to be disconnected during ${timeRange}.`
+      `User ${alias} set to be disconnected during ${timeRange} with timezone ${timezone}.`
     );
   }
 
@@ -291,13 +308,13 @@ client.on("interactionCreate", async (interaction) => {
   if (commandName === "help") {
     await interaction.reply(
       "**Bot Commands:**\n" +
-        "/setuser userid, alias, notallowedtime, channelid - Set user disconnection settings.\n" +
+        "/setuser userid, alias, notallowedtime, channelid, [timezone] - Set user disconnection settings.\n" +
         "/removeuser userid, channelid - Remove user from disconnection settings.\n" +
         "/setchannels channelids, aliases - Set channels to monitor with aliases.\n" +
         "/userlist - List all users with settings.\n" +
         "/addedchannels - List all monitored channels.\n" +
         "/setlogchannel channelid - Set the logging channel.\n" +
-        "/superdc userid, timerange - Disconnect user from any channel during a time range.\n" +
+        "/superdc userid, timerange, [timezone] - Disconnect user from any channel during a time range.\n" +
         "/removesuperdc userid - Remove user from super disconnection settings.\n" +
         "/addmod userid - Add a user as a bot moderator.\n" +
         "/help - Display this help message.\n" +
@@ -308,54 +325,56 @@ client.on("interactionCreate", async (interaction) => {
 
 client.on("voiceStateUpdate", (oldState, newState) => {
   const userId = newState.id;
-  const now = new Date();
-  const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(
-    now.getMinutes()
-  ).padStart(2, "0")}`;
+  const now = moment().tz("Asia/Kolkata");
+  const currentTime = now.format("HH:mm");
 
   // Check for regular disconnection settings
   if (
     userSettings[userId] &&
     userSettings[userId].channelId === newState.channelId
   ) {
-    const [start, end] = userSettings[userId].notAllowedTime.split("-");
-    if (currentTime >= start && currentTime <= end) {
+    const { notAllowedTime, alias, timezone } = userSettings[userId];
+    const [start, end] = notAllowedTime.split("-");
+    const userTime = moment().tz(timezone || "Asia/Kolkata");
+
+    if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
       newState.disconnect();
       logAction(
-        `Disconnected ${userSettings[userId].alias} (${userId}) from channel ${newState.channelId}.`
+        `Disconnected ${alias} (${userId}) from channel ${newState.channelId}.`
       );
     }
   }
 
   // Check for super disconnection settings
   if (superDcSettings[userId]) {
-    const [start, end] = superDcSettings[userId].timeRange.split("-");
-    if (currentTime >= start && currentTime <= end) {
+    const { timeRange, alias, timezone } = superDcSettings[userId];
+    const [start, end] = timeRange.split("-");
+    const userTime = moment().tz(timezone || "Asia/Kolkata");
+
+    if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
       newState.disconnect();
-      logAction(
-        `Super disconnected ${superDcSettings[userId].alias} (${userId}) from any channel.`
-      );
+      logAction(`Super disconnected ${alias} (${userId}) from any channel.`);
     }
   }
 });
 
 function checkTimeAndDisconnect() {
-  const now = new Date();
-  const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(
-    now.getMinutes()
-  ).padStart(2, "0")}`;
+  const now = moment().tz("Asia/Kolkata");
+  const currentTime = now.format("HH:mm");
 
   for (const [userId, settings] of Object.entries(userSettings)) {
-    const [start, end] = settings.notAllowedTime.split("-");
+    const { notAllowedTime, alias, channelId, timezone } = settings;
+    const [start, end] = notAllowedTime.split("-");
+    const userTime = moment().tz(timezone || "Asia/Kolkata");
     const member = client.guilds.cache
       .map((guild) => guild.members.cache.get(userId))
       .find((m) => m);
 
-    if (member && member.voice.channelId === settings.channelId) {
-      if (currentTime >= start && currentTime <= end) {
+    if (member && member.voice.channelId === channelId) {
+      if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
         member.voice.disconnect();
         logAction(
-          `Disconnected ${settings.alias} (${userId}) from channel ${settings.channelId}.`
+          `Disconnected ${alias} (${userId}) from channel ${channelId}.`
         );
       } else if (currentTime === start || currentTime === end) {
         sendWarningMessage(member, 15);
@@ -366,17 +385,17 @@ function checkTimeAndDisconnect() {
   }
 
   for (const [userId, settings] of Object.entries(superDcSettings)) {
-    const [start, end] = settings.timeRange.split("-");
+    const { timeRange, alias, timezone } = settings;
+    const [start, end] = timeRange.split("-");
+    const userTime = moment().tz(timezone || "Asia/Kolkata");
     const member = client.guilds.cache
       .map((guild) => guild.members.cache.get(userId))
       .find((m) => m);
 
     if (member && member.voice.channelId) {
-      if (currentTime >= start && currentTime <= end) {
+      if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
         member.voice.disconnect();
-        logAction(
-          `Super disconnected ${settings.alias} (${userId}) from any channel.`
-        );
+        logAction(`Super disconnected ${alias} (${userId}) from any channel.`);
       } else if (currentTime === start || currentTime === end) {
         sendWarningMessage(member, 15);
       } else if (currentTime === start || currentTime === end) {

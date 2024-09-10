@@ -34,6 +34,7 @@ let userSettings = {}; // { userId: { alias: "", notAllowedTime: "", channelId: 
 let superDcSettings = {}; // { userId: { alias: "", timeRange: "" } }
 let targetChannels = []; // [{ channelId: "", alias: "" }]
 let logChannelId = null; // Channel ID for logging
+let modUsers = new Set(); // Set of user IDs with permission to modify settings
 
 const commands = [
   new SlashCommandBuilder()
@@ -113,6 +114,20 @@ const commands = [
     )
     .setDefaultMemberPermissions(0x00000008), // Admin permission
   new SlashCommandBuilder()
+    .setName("removesuperdc")
+    .setDescription("Remove a user from super disconnection settings.")
+    .addStringOption((option) =>
+      option.setName("userid").setDescription("User ID").setRequired(true)
+    )
+    .setDefaultMemberPermissions(0x00000008), // Admin permission
+  new SlashCommandBuilder()
+    .setName("addmod")
+    .setDescription("Add a user as a bot moderator.")
+    .addStringOption((option) =>
+      option.setName("userid").setDescription("User ID").setRequired(true)
+    )
+    .setDefaultMemberPermissions(0x00000008), // Admin permission
+  new SlashCommandBuilder()
     .setName("help")
     .setDescription("Display help information about the bot."),
 ];
@@ -137,6 +152,15 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isCommand()) return;
 
   const { commandName } = interaction;
+
+  // Check if the user is a moderator
+  if (
+    !modUsers.has(interaction.user.id) &&
+    commandName !== "addmod" &&
+    commandName !== "help"
+  ) {
+    return interaction.reply("You do not have permission to use this command.");
+  }
 
   if (commandName === "setuser") {
     const userId = interaction.options.getString("userid").trim();
@@ -243,6 +267,27 @@ client.on("interactionCreate", async (interaction) => {
     );
   }
 
+  if (commandName === "removesuperdc") {
+    const userId = interaction.options.getString("userid").trim();
+
+    if (superDcSettings[userId]) {
+      delete superDcSettings[userId];
+      await interaction.reply(
+        `User ${userId} removed from super disconnection settings.`
+      );
+    } else {
+      await interaction.reply(
+        `User ${userId} not found in super disconnection settings.`
+      );
+    }
+  }
+
+  if (commandName === "addmod") {
+    const userId = interaction.options.getString("userid").trim();
+    modUsers.add(userId);
+    await interaction.reply(`User ${userId} added as a bot moderator.`);
+  }
+
   if (commandName === "help") {
     await interaction.reply(
       "**Bot Commands:**\n" +
@@ -253,6 +298,8 @@ client.on("interactionCreate", async (interaction) => {
         "/addedchannels - List all monitored channels.\n" +
         "/setlogchannel channelid - Set the logging channel.\n" +
         "/superdc userid, timerange - Disconnect user from any channel during a time range.\n" +
+        "/removesuperdc userid - Remove user from super disconnection settings.\n" +
+        "/addmod userid - Add a user as a bot moderator.\n" +
         "/help - Display this help message.\n" +
         "\nMade with ❤️ by [ybtheflash](https://ybtheflash.in)"
     );

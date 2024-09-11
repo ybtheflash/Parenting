@@ -323,19 +323,18 @@ client.on("interactionCreate", async (interaction) => {
 
 client.on("voiceStateUpdate", (oldState, newState) => {
   const userId = newState.id;
-  const now = moment().utcOffset("+0530");
-  const currentTime = now.format("HH:mm");
 
   // Check for regular disconnection settings
-  if (
-    userSettings[userId] &&
-    userSettings[userId].channelId === newState.channelId
-  ) {
-    const { notAllowedTime, alias, timezoneOffset } = userSettings[userId];
+  if (userSettings[userId]) {
+    const { notAllowedTime, alias, timezoneOffset, channelId } =
+      userSettings[userId];
     const [start, end] = notAllowedTime.split("-");
     const userTime = moment().utcOffset(timezoneOffset || "+0530");
 
-    if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
+    if (
+      newState.channelId === channelId &&
+      userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))
+    ) {
       newState.disconnect();
       logAction(
         `Disconnected ${alias} (${userId}) from channel ${newState.channelId}.`
@@ -358,7 +357,6 @@ client.on("voiceStateUpdate", (oldState, newState) => {
 
 function checkTimeAndDisconnect() {
   const now = moment().utcOffset("+0530");
-  const currentTime = now.format("HH:mm");
 
   for (const [userId, settings] of Object.entries(userSettings)) {
     const { notAllowedTime, alias, channelId, timezoneOffset } = settings;
@@ -368,17 +366,23 @@ function checkTimeAndDisconnect() {
       .map((guild) => guild.members.cache.get(userId))
       .find((m) => m);
 
-    if (member && member.voice.channelId === channelId) {
-      if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
-        member.voice.disconnect();
-        logAction(
-          `Disconnected ${alias} (${userId}) from channel ${channelId}.`
-        );
-      } else if (currentTime === start || currentTime === end) {
-        sendWarningMessage(member, 15);
-      } else if (currentTime === start || currentTime === end) {
-        sendWarningMessage(member, 5);
-      }
+    if (
+      member &&
+      member.voice.channelId === channelId &&
+      userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))
+    ) {
+      member.voice.disconnect();
+      logAction(`Disconnected ${alias} (${userId}) from channel ${channelId}.`);
+    } else if (
+      userTime.isSame(moment(start, "HH:mm").subtract(15, "minutes")) ||
+      userTime.isSame(moment(end, "HH:mm").subtract(15, "minutes"))
+    ) {
+      sendWarningMessage(member, 15);
+    } else if (
+      userTime.isSame(moment(start, "HH:mm").subtract(5, "minutes")) ||
+      userTime.isSame(moment(end, "HH:mm").subtract(5, "minutes"))
+    ) {
+      sendWarningMessage(member, 5);
     }
   }
 
@@ -390,15 +394,22 @@ function checkTimeAndDisconnect() {
       .map((guild) => guild.members.cache.get(userId))
       .find((m) => m);
 
-    if (member && member.voice.channelId) {
-      if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
-        member.voice.disconnect();
-        logAction(`Super disconnected ${alias} (${userId}) from any channel.`);
-      } else if (currentTime === start || currentTime === end) {
-        sendWarningMessage(member, 15);
-      } else if (currentTime === start || currentTime === end) {
-        sendWarningMessage(member, 5);
-      }
+    if (
+      member &&
+      userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))
+    ) {
+      member.voice.disconnect();
+      logAction(`Super disconnected ${alias} (${userId}) from any channel.`);
+    } else if (
+      userTime.isSame(moment(start, "HH:mm").subtract(15, "minutes")) ||
+      userTime.isSame(moment(end, "HH:mm").subtract(15, "minutes"))
+    ) {
+      sendWarningMessage(member, 15);
+    } else if (
+      userTime.isSame(moment(start, "HH:mm").subtract(5, "minutes")) ||
+      userTime.isSame(moment(end, "HH:mm").subtract(5, "minutes"))
+    ) {
+      sendWarningMessage(member, 5);
     }
   }
 }

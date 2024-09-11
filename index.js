@@ -59,7 +59,7 @@ const commands = [
     .addStringOption((option) =>
       option
         .setName("timezone")
-        .setDescription("Timezone (default: Asia/Kolkata)")
+        .setDescription("Timezone offset (e.g., +0530)")
         .setRequired(false)
     )
     .setDefaultMemberPermissions(0x00000008), // Admin permission
@@ -122,7 +122,7 @@ const commands = [
     .addStringOption((option) =>
       option
         .setName("timezone")
-        .setDescription("Timezone (default: Asia/Kolkata)")
+        .setDescription("Timezone offset (e.g., +0530)")
         .setRequired(false)
     )
     .setDefaultMemberPermissions(0x00000008), // Admin permission
@@ -182,16 +182,15 @@ client.on("interactionCreate", async (interaction) => {
       .getString("notallowedtime")
       .trim();
     const channelId = interaction.options.getString("channelid").trim();
-    const timezone =
-      interaction.options.getString("timezone") || "Asia/Kolkata";
+    const timezoneOffset = interaction.options.getString("timezone") || "+0530";
 
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(notAllowedTime)) {
       return interaction.reply("Invalid time range format. Use HH:MM-HH:MM.");
     }
 
-    userSettings[userId] = { alias, notAllowedTime, channelId, timezone };
+    userSettings[userId] = { alias, notAllowedTime, channelId, timezoneOffset };
     await interaction.reply(
-      `User ${alias} set with not allowed time ${notAllowedTime} in channel ${channelId} with timezone ${timezone}.`
+      `User ${alias} set with not allowed time ${notAllowedTime} in channel ${channelId} with timezone offset ${timezoneOffset}.`
     );
   }
 
@@ -240,13 +239,13 @@ client.on("interactionCreate", async (interaction) => {
 
   if (commandName === "userlist") {
     const regularUsers = Object.entries(userSettings).map(
-      ([userId, { alias, notAllowedTime, channelId, timezone }]) =>
-        `${alias} (${userId}): ${notAllowedTime} in channel ${channelId} (Timezone: ${timezone})`
+      ([userId, { alias, notAllowedTime, channelId, timezoneOffset }]) =>
+        `${alias} (${userId}): ${notAllowedTime} in channel ${channelId} (Timezone offset: ${timezoneOffset})`
     );
 
     const superDcUsers = Object.entries(superDcSettings).map(
-      ([userId, { alias, timeRange, timezone }]) =>
-        `${alias} (${userId}): Super DC during ${timeRange} (Timezone: ${timezone})`
+      ([userId, { alias, timeRange, timezoneOffset }]) =>
+        `${alias} (${userId}): Super DC during ${timeRange} (Timezone offset: ${timezoneOffset})`
     );
 
     const userList = [...regularUsers, ...superDcUsers].join("\n");
@@ -271,16 +270,15 @@ client.on("interactionCreate", async (interaction) => {
     const userId = interaction.options.getString("userid").trim();
     const alias = interaction.options.getString("alias").trim();
     const timeRange = interaction.options.getString("timerange").trim();
-    const timezone =
-      interaction.options.getString("timezone") || "Asia/Kolkata";
+    const timezoneOffset = interaction.options.getString("timezone") || "+0530";
 
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(timeRange)) {
       return interaction.reply("Invalid time range format. Use HH:MM-HH:MM.");
     }
 
-    superDcSettings[userId] = { alias, timeRange, timezone };
+    superDcSettings[userId] = { alias, timeRange, timezoneOffset };
     await interaction.reply(
-      `User ${alias} set to be disconnected during ${timeRange} with timezone ${timezone}.`
+      `User ${alias} set to be disconnected during ${timeRange} with timezone offset ${timezoneOffset}.`
     );
   }
 
@@ -316,7 +314,7 @@ client.on("interactionCreate", async (interaction) => {
         "/setlogchannel channelid - Set the logging channel.\n" +
         "/superdc userid, timerange, [timezone] - Disconnect user from any channel during a time range.\n" +
         "/removesuperdc userid - Remove user from super disconnection settings.\n" +
-        "/addmod userid - Add a user as a bot moderator.\n" +
+        "timezone - You can modify timezones to match yours, default is +0530.\n" +
         "/help - Display this help message.\n" +
         "\nMade with ❤️ by [ybtheflash](https://ybtheflash.in)"
     );
@@ -325,7 +323,7 @@ client.on("interactionCreate", async (interaction) => {
 
 client.on("voiceStateUpdate", (oldState, newState) => {
   const userId = newState.id;
-  const now = moment().tz("Asia/Kolkata");
+  const now = moment().utcOffset("+0530");
   const currentTime = now.format("HH:mm");
 
   // Check for regular disconnection settings
@@ -333,9 +331,9 @@ client.on("voiceStateUpdate", (oldState, newState) => {
     userSettings[userId] &&
     userSettings[userId].channelId === newState.channelId
   ) {
-    const { notAllowedTime, alias, timezone } = userSettings[userId];
+    const { notAllowedTime, alias, timezoneOffset } = userSettings[userId];
     const [start, end] = notAllowedTime.split("-");
-    const userTime = moment().tz(timezone || "Asia/Kolkata");
+    const userTime = moment().utcOffset(timezoneOffset || "+0530");
 
     if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
       newState.disconnect();
@@ -347,9 +345,9 @@ client.on("voiceStateUpdate", (oldState, newState) => {
 
   // Check for super disconnection settings
   if (superDcSettings[userId]) {
-    const { timeRange, alias, timezone } = superDcSettings[userId];
+    const { timeRange, alias, timezoneOffset } = superDcSettings[userId];
     const [start, end] = timeRange.split("-");
-    const userTime = moment().tz(timezone || "Asia/Kolkata");
+    const userTime = moment().utcOffset(timezoneOffset || "+0530");
 
     if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
       newState.disconnect();
@@ -359,13 +357,13 @@ client.on("voiceStateUpdate", (oldState, newState) => {
 });
 
 function checkTimeAndDisconnect() {
-  const now = moment().tz("Asia/Kolkata");
+  const now = moment().utcOffset("+0530");
   const currentTime = now.format("HH:mm");
 
   for (const [userId, settings] of Object.entries(userSettings)) {
-    const { notAllowedTime, alias, channelId, timezone } = settings;
+    const { notAllowedTime, alias, channelId, timezoneOffset } = settings;
     const [start, end] = notAllowedTime.split("-");
-    const userTime = moment().tz(timezone || "Asia/Kolkata");
+    const userTime = moment().utcOffset(timezoneOffset || "+0530");
     const member = client.guilds.cache
       .map((guild) => guild.members.cache.get(userId))
       .find((m) => m);
@@ -385,9 +383,9 @@ function checkTimeAndDisconnect() {
   }
 
   for (const [userId, settings] of Object.entries(superDcSettings)) {
-    const { timeRange, alias, timezone } = settings;
+    const { timeRange, alias, timezoneOffset } = settings;
     const [start, end] = timeRange.split("-");
-    const userTime = moment().tz(timezone || "Asia/Kolkata");
+    const userTime = moment().utcOffset(timezoneOffset || "+0530");
     const member = client.guilds.cache
       .map((guild) => guild.members.cache.get(userId))
       .find((m) => m);

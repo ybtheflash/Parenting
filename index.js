@@ -7,7 +7,6 @@ const {
   Routes,
   SlashCommandBuilder,
 } = require("discord.js");
-const moment = require("moment-timezone");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,8 +30,8 @@ const client = new Client({
 });
 
 const TOKEN = process.env.BOT_TOKEN;
-let userSettings = {}; // { userId: { alias: "", notAllowedTime: "", channelId: "", timezone: "" } }
-let superDcSettings = {}; // { userId: { alias: "", timeRange: "", timezone: "" } }
+let userSettings = {}; // { userId: { alias: "", notAllowedTime: "", channelId: "", timezoneOffset: "" } }
+let superDcSettings = {}; // { userId: { alias: "", timeRange: "", timezoneOffset: "" } }
 let targetChannels = []; // [{ channelId: "", alias: "" }]
 let logChannelId = null; // Channel ID for logging
 let modUsers = new Set(); // Set of user IDs with permission to modify settings
@@ -189,8 +188,9 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     userSettings[userId] = { alias, notAllowedTime, channelId, timezoneOffset };
+    const currentUserTime = getCurrentUserTime(timezoneOffset);
     await interaction.reply(
-      `User ${alias} set with not allowed time ${notAllowedTime} in channel ${channelId} with timezone offset ${timezoneOffset}.`
+      `User ${alias} set with not allowed time ${notAllowedTime} in channel ${channelId} with timezone offset ${timezoneOffset}. Current user time: ${currentUserTime}`
     );
   }
 
@@ -277,8 +277,9 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     superDcSettings[userId] = { alias, timeRange, timezoneOffset };
+    const currentUserTime = getCurrentUserTime(timezoneOffset);
     await interaction.reply(
-      `User ${alias} set to be disconnected during ${timeRange} with timezone offset ${timezoneOffset}.`
+      `User ${alias} set to be disconnected during ${timeRange} with timezone offset ${timezoneOffset}. Current user time: ${currentUserTime}`
     );
   }
 
@@ -329,11 +330,11 @@ client.on("voiceStateUpdate", (oldState, newState) => {
     const { notAllowedTime, alias, timezoneOffset, channelId } =
       userSettings[userId];
     const [start, end] = notAllowedTime.split("-");
-    const userTime = moment().utcOffset(timezoneOffset || "+0530");
+    const currentUserTime = getCurrentUserTime(timezoneOffset);
 
     if (
       newState.channelId === channelId &&
-      userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))
+      isTimeInRange(currentUserTime, start, end)
     ) {
       newState.disconnect();
       logAction(
@@ -346,9 +347,9 @@ client.on("voiceStateUpdate", (oldState, newState) => {
   if (superDcSettings[userId]) {
     const { timeRange, alias, timezoneOffset } = superDcSettings[userId];
     const [start, end] = timeRange.split("-");
-    const userTime = moment().utcOffset(timezoneOffset || "+0530");
+    const currentUserTime = getCurrentUserTime(timezoneOffset);
 
-    if (userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))) {
+    if (isTimeInRange(currentUserTime, start, end)) {
       newState.disconnect();
       logAction(`Super disconnected ${alias} (${userId}) from any channel.`);
     }
@@ -356,12 +357,10 @@ client.on("voiceStateUpdate", (oldState, newState) => {
 });
 
 function checkTimeAndDisconnect() {
-  const now = moment().utcOffset("+0530");
-
   for (const [userId, settings] of Object.entries(userSettings)) {
     const { notAllowedTime, alias, channelId, timezoneOffset } = settings;
     const [start, end] = notAllowedTime.split("-");
-    const userTime = moment().utcOffset(timezoneOffset || "+0530");
+    const currentUserTime = getCurrentUserTime(timezoneOffset);
     const member = client.guilds.cache
       .map((guild) => guild.members.cache.get(userId))
       .find((m) => m);
@@ -369,19 +368,13 @@ function checkTimeAndDisconnect() {
     if (
       member &&
       member.voice.channelId === channelId &&
-      userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))
+      isTimeInRange(currentUserTime, start, end)
     ) {
       member.voice.disconnect();
       logAction(`Disconnected ${alias} (${userId}) from channel ${channelId}.`);
-    } else if (
-      userTime.isSame(moment(start, "HH:mm").subtract(15, "minutes")) ||
-      userTime.isSame(moment(end, "HH:mm").subtract(15, "minutes"))
-    ) {
+    } else if (isTimeNear(currentUserTime, start, end, 15)) {
       sendWarningMessage(member, 15);
-    } else if (
-      userTime.isSame(moment(start, "HH:mm").subtract(5, "minutes")) ||
-      userTime.isSame(moment(end, "HH:mm").subtract(5, "minutes"))
-    ) {
+    } else if (isTimeNear(currentUserTime, start, end, 5)) {
       sendWarningMessage(member, 5);
     }
   }
@@ -389,29 +382,49 @@ function checkTimeAndDisconnect() {
   for (const [userId, settings] of Object.entries(superDcSettings)) {
     const { timeRange, alias, timezoneOffset } = settings;
     const [start, end] = timeRange.split("-");
-    const userTime = moment().utcOffset(timezoneOffset || "+0530");
+    const currentUserTime = getCurrentUserTime(timezoneOffset);
     const member = client.guilds.cache
       .map((guild) => guild.members.cache.get(userId))
       .find((m) => m);
 
-    if (
-      member &&
-      userTime.isBetween(moment(start, "HH:mm"), moment(end, "HH:mm"))
-    ) {
+    if (member && isTimeInRange(currentUserTime, start, end)) {
       member.voice.disconnect();
       logAction(`Super disconnected ${alias} (${userId}) from any channel.`);
-    } else if (
-      userTime.isSame(moment(start, "HH:mm").subtract(15, "minutes")) ||
-      userTime.isSame(moment(end, "HH:mm").subtract(15, "minutes"))
-    ) {
+    } else if (isTimeNear(currentUserTime, start, end, 15)) {
       sendWarningMessage(member, 15);
-    } else if (
-      userTime.isSame(moment(start, "HH:mm").subtract(5, "minutes")) ||
-      userTime.isSame(moment(end, "HH:mm").subtract(5, "minutes"))
-    ) {
+    } else if (isTimeNear(currentUserTime, start, end, 5)) {
       sendWarningMessage(member, 5);
     }
   }
+}
+
+function getCurrentUserTime(timezoneOffset) {
+  const now = new Date();
+  const offsetHours = parseInt(timezoneOffset.slice(0, 3), 10);
+  const offsetMinutes = parseInt(timezoneOffset.slice(3), 10);
+  now.setUTCHours(now.getUTCHours() + offsetHours);
+  now.setUTCMinutes(now.getUTCMinutes() + offsetMinutes);
+  return now;
+}
+
+function isTimeInRange(currentTime, start, end) {
+  const [startHours, startMinutes] = start.split(":").map(Number);
+  const [endHours, endMinutes] = end.split(":").map(Number);
+  const startTime = new Date(currentTime);
+  startTime.setHours(startHours, startMinutes, 0, 0);
+  const endTime = new Date(currentTime);
+  endTime.setHours(endHours, endMinutes, 0, 0);
+  return currentTime >= startTime && currentTime <= endTime;
+}
+
+function isTimeNear(currentTime, start, end, minutes) {
+  const [startHours, startMinutes] = start.split(":").map(Number);
+  const [endHours, endMinutes] = end.split(":").map(Number);
+  const startTime = new Date(currentTime);
+  startTime.setHours(startHours, startMinutes - minutes, 0, 0);
+  const endTime = new Date(currentTime);
+  endTime.setHours(endHours, endMinutes - minutes, 0, 0);
+  return currentTime >= startTime && currentTime <= endTime;
 }
 
 function sendWarningMessage(member, minutes) {

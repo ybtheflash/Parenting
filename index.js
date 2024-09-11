@@ -336,7 +336,7 @@ client.on("voiceStateUpdate", (oldState, newState) => {
       newState.channelId === channelId &&
       isTimeInRange(currentUserTime, start, end)
     ) {
-      newState.disconnect();
+      newState.disconnect().catch(console.error);
       logAction(
         `Disconnected ${alias} (${userId}) from channel ${newState.channelId}.`
       );
@@ -350,7 +350,7 @@ client.on("voiceStateUpdate", (oldState, newState) => {
     const currentUserTime = getCurrentUserTime(timezoneOffset);
 
     if (isTimeInRange(currentUserTime, start, end)) {
-      newState.disconnect();
+      newState.disconnect().catch(console.error);
       logAction(`Super disconnected ${alias} (${userId}) from any channel.`);
     }
   }
@@ -370,7 +370,7 @@ function checkTimeAndDisconnect() {
       member.voice.channelId === channelId &&
       isTimeInRange(currentUserTime, start, end)
     ) {
-      member.voice.disconnect();
+      member.voice.disconnect().catch(console.error);
       logAction(`Disconnected ${alias} (${userId}) from channel ${channelId}.`);
     } else if (isTimeNear(currentUserTime, start, end, 15)) {
       sendWarningMessage(member, 15);
@@ -388,7 +388,7 @@ function checkTimeAndDisconnect() {
       .find((m) => m);
 
     if (member && isTimeInRange(currentUserTime, start, end)) {
-      member.voice.disconnect();
+      member.voice.disconnect().catch(console.error);
       logAction(`Super disconnected ${alias} (${userId}) from any channel.`);
     } else if (isTimeNear(currentUserTime, start, end, 15)) {
       sendWarningMessage(member, 15);
@@ -428,9 +428,11 @@ function isTimeNear(currentTime, start, end, minutes) {
 }
 
 function sendWarningMessage(member, minutes) {
-  member
-    .send(`You will be disconnected in ${minutes} minutes.`)
-    .catch(console.error);
+  if (member) {
+    member
+      .send(`You will be disconnected in ${minutes} minutes.`)
+      .catch(console.error);
+  }
 }
 
 function logAction(message) {
